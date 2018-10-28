@@ -1,4 +1,8 @@
 scikit-learn
-tensorflow==1.1.0
+tensorflow==1.11.0
+tensorflow-gpu==1.11.0
 pandas
 numpy
+tensor2tensor==1.9.0
+kafka-python
+tqdm
