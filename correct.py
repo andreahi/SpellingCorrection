@@ -13,7 +13,15 @@
 # - Summary
 
 # In[1]:
+import copy
+import pickle
+import random
 
+from tensorflow.contrib import training
+
+from Utils import save_obj
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 import pandas as pd
@@ -34,196 +42,147 @@ from sklearn.model_selection import train_test_split
 
 # In[2]:
 
-def load_book(path):
-    """Load a book from its file"""
+def load_text(path):
     input_file = os.path.join(path)
     with open(input_file, encoding="utf-8") as f:
-        book = f.read()
-    return book
-
-
-# In[3]:
-
-# Collect all of the book file names
-path = './books/'
-book_files = [f for f in listdir(path) if isfile(join(path, f))]
-book_files = book_files[1:]
-
-# In[4]:
-
-# Load the books using the file names
-books = []
-for book in book_files:
-    print(path)
-    print(book)
-    books.append(load_book(path + book))
-
-# In[5]:
-
-# Compare the number of words in each book
-for i in range(len(books)):
-    print("There are {} words in {}.".format(len(books[i].split()), book_files[i]))
-
-# In[9]:
-
-# Check to ensure the text looks alright
-books[0][:500]
-
-
-# ## Preparing the Data
-
-# In[10]:
+        text = f.read()
+    return text
 
 def clean_text(text):
     '''Remove unwanted characters and extra spaces from the text'''
+
     text = text.lower()
     text = re.sub(r'\n', ' ', text)
-    text = re.sub(r'[{}@_*>()\\#%+=\[\]]', '', text)
-    text = re.sub('a0', '', text)
-    text = re.sub('\'92t', '\'t', text)
-    text = re.sub('\'92s', '\'s', text)
-    text = re.sub('\'92m', '\'m', text)
-    text = re.sub('\'92ll', '\'ll', text)
-    text = re.sub('\'91', '', text)
-    text = re.sub('\'92', '', text)
-    text = re.sub('\'93', '', text)
-    text = re.sub('\'94', '', text)
-    text = re.sub('\.', '. ', text)
-    text = re.sub('\!', '! ', text)
-    text = re.sub('\?', '? ', text)
-    text = re.sub(' +', ' ', text)
+
+
     return text
 
 
-# In[11]:
+# In[3]:
+def pre_data():
+    global clean_text, sentence, training_sorted, testing_sorted
+    # Collect all of the book file names
+    path = './books/'
+    book_files = [f for f in listdir(path) if isfile(join(path, f))]
+    #book_files = book_files[1:]
+    # In[4]:
+    # Load the books using the file names
+    books = []
+    for book in book_files:
+        print(path)
+        print(book)
+        books.append(load_text(path + book))
+    # In[5]:
+    # Compare the number of words in each book
+    for i in range(len(books)):
+        print("There are {} words in {}.".format(len(books[i].split()), book_files[i]))
+    # In[9]:
+    # Check to ensure the text looks alright
+    books[0][:500]
 
-# Clean the text of the books
-clean_books = []
-for book in books:
-    clean_books.append(clean_text(book))
+    # ## Preparing the Data
+    # In[10]:
 
-# In[12]:
-
-# Check to ensure the text has been cleaned properly
-clean_books[0][:500]
-
-# In[13]:
-
-# Create a dictionary to convert the vocabulary (characters) to integers
-vocab_to_int = {}
-count = 0
-for book in clean_books:
-    for character in book:
-        if character not in vocab_to_int:
-            vocab_to_int[character] = count
-            count += 1
-
-# Add special tokens to vocab_to_int
-codes = ['<PAD>', '<EOS>', '<GO>']
-for code in codes:
-    vocab_to_int[code] = count
-    count += 1
-
-# In[14]:
-
-# Check the size of vocabulary and all of the values
-vocab_size = len(vocab_to_int)
-print("The vocabulary contains {} characters.".format(vocab_size))
-print(sorted(vocab_to_int))
-
-# *Note: We could have made this project a little easier by using only lower case words and fewer special characters ($,&,-...), but I want to make this spell checker as useful as possible.*
-
-# In[15]:
-
-# Create another dictionary to convert integers to their respective characters
-int_to_vocab = {}
-for character, value in vocab_to_int.items():
-    int_to_vocab[value] = character
-
-# In[16]:
-
-# Split the text from the books into sentences.
-sentences = []
-for book in clean_books:
-    for sentence in book.split('.'):
-        sentences.append(sentence + '.')
-print("There are {} sentences.".format(len(sentences)))
-
-# In[17]:
-
-# Check to ensure the text has been split correctly.
-sentences[:5]
-
-# *Note: I expect that you have noticed the very ugly text in the first sentence. We do not need to worry about removing it from any of the books because will be limiting our data to sentences that are shorter than it.*
-
-# In[18]:
-
-# Convert sentences to integers
-int_sentences = []
-
-for sentence in sentences:
-    int_sentence = []
-    for character in sentence:
-        int_sentence.append(vocab_to_int[character])
-    int_sentences.append(int_sentence)
-
-# In[19]:
-
-# Find the length of each sentence
-lengths = []
-for sentence in int_sentences:
-    lengths.append(len(sentence))
-lengths = pd.DataFrame(lengths, columns=["counts"])
-
-# In[20]:
-
-lengths.describe()
-
-# In[21]:
-
-# Limit the data we will use to train our model
-max_length = 92
-min_length = 3
-
-good_sentences = []
-
-for sentence in int_sentences:
-    if len(sentence) <= max_length and len(sentence) >= min_length:
-        good_sentences.append(sentence)
-    else:
-        print("sentence not good enough: ", sentence)
-
-print("We will use {} to train and test our model.".format(len(good_sentences)))
-
-# *Note: I decided to not use very long or short sentences because they are not as useful for training our model. Shorter sentences are less likely to include an error and the text is more likely to be repetitive. Longer sentences are more difficult to learn due to their length and increase the training time quite a bit. If you are interested in using this model for more than just a personal project, it would be worth using these longer sentence, and much more training data to create a more accurate model.*
-
-# In[22]:
-
-# Split the data into training and testing sentences
-training, testing = train_test_split(good_sentences, test_size=0.15, random_state=2)
-
-print("Number of training sentences:", len(training))
-print("Number of testing sentences:", len(testing))
-
-# In[23]:
-
-# Sort the sentences by length to reduce padding, which will allow the model to train faster
-training_sorted = []
-testing_sorted = []
-
-for i in range(min_length, max_length + 1):
-    for sentence in training:
-        if len(sentence) == i:
-            training_sorted.append(sentence)
-    for sentence in testing:
-        if len(sentence) == i:
-            testing_sorted.append(sentence)
-
-# In[24]:
-
-# Check to ensure the sentences have been selected and sorted correctly
-for i in range(2):
-    print(training_sorted[i], len(training_sorted[i]))
+    # In[11]:
+    # Clean the text of the books
+    clean_books = []
+    for book in books:
+        clean_books.append(clean_text(book))
+    # In[12]:
+    # Check to ensure the text has been cleaned properly
+    clean_books[0][:500]
+    # In[13]:
+    # Create a dictionary to convert the vocabulary (characters) to integers
+    vocab_to_int = {}
+    count = 0
+    for book in clean_books:
+        for character in book:
+            if character not in vocab_to_int:
+                vocab_to_int[character] = count
+                count += 1
+    # Add special tokens to vocab_to_int
+    codes = ['<PAD>', '<EOS>', '<GO>']
+    for code in codes:
+        vocab_to_int[code] = count
+        count += 1
+    # In[14]:
+    # Check the size of vocabulary and all of the values
+    vocab_size = len(vocab_to_int)
+    print("The vocabulary contains {} characters.".format(vocab_size))
+    print(sorted(vocab_to_int))
+    save_obj(vocab_to_int, "vocab_to_int")
+    # *Note: We could have made this project a little easier by using only lower case words and fewer special characters ($,&,-...), but I want to make this spell checker as useful as possible.*
+    # In[15]:
+    # Create another dictionary to convert integers to their respective characters
+    int_to_vocab = {}
+    for character, value in vocab_to_int.items():
+        int_to_vocab[value] = character
+    save_obj(int_to_vocab, "int_to_vocab")
+    # In[16]:
+    # Split the text from the books into sentences.
+    sentences = []
+    for book in clean_books:
+        for sentence in book.split('.'):
+            sentences.append(sentence.strip() + '.')
+    print("There are {} sentences.".format(len(sentences)))
+    # In[17]:
+    # Check to ensure the text has been split correctly.
+    sentences[:5]
+    # *Note: I expect that you have noticed the very ugly text in the first sentence. We do not need to worry about removing it from any of the books because will be limiting our data to sentences that are shorter than it.*
+    # In[18]:
+    # Convert sentences to integers
+    int_sentences = []
+    for sentence in sentences:
+        int_sentence = []
+        for character in sentence:
+            int_sentence.append(vocab_to_int[character])
+        int_sentences.append(int_sentence)
+    # In[19]:
+    # Find the length of each sentence
+    lengths = []
+    for sentence in int_sentences:
+        lengths.append(len(sentence))
+    lengths = pd.DataFrame(lengths, columns=["counts"])
+    # In[20]:
+    lengths.describe()
+    # In[21]:
+    # Limit the data we will use to train our model
+    max_length = 190
+    min_length = 3
+    good_sentences = []
+    for sentence in int_sentences:
+        if len(sentence) <= max_length and len(sentence) >= min_length:
+            good_sentences.append(sentence)
+        else:
+            print("sentence not good enough: ", sentence)
+    print("We will use {} to train and test our model.".format(len(good_sentences)))
+    # *Note: I decided to not use very long or short sentences because they are not as useful for training our model. Shorter sentences are less likely to include an error and the text is more likely to be repetitive. Longer sentences are more difficult to learn due to their length and increase the training time quite a bit. If you are interested in using this model for more than just a personal project, it would be worth using these longer sentence, and much more training data to create a more accurate model.*
+    # In[22]:
+    # Split the data into training and testing sentences
+    training, testing = train_test_split(good_sentences, test_size=0.15, random_state=2)
+    print("Number of training sentences:", len(training))
+    print("Number of testing sentences:", len(testing))
+    # In[23]:
+    # Sort the sentences by length to reduce padding, which will allow the model to train faster
+    training_sorted = []
+    testing_sorted = []
+    for i in range(min_length, max_length + 1):
+        for sentence in training:
+            if len(sentence) == i:
+                training_sorted.append(sentence)
+        for sentence in testing:
+            if len(sentence) == i:
+                testing_sorted.append(sentence)
+    # In[24]:
+    # Check to ensure the sentences have been selected and sorted correctly
+    for i in range(2):
+        print(training_sorted[i], len(training_sorted[i]))
+    threshold = 0.9
+    for sentence in training_sorted[:5]:
+        print(sentence)
+        print(noise_maker(sentence, threshold, vocab_to_int))
+        print()
+    return vocab_to_int
 
 # In[36]:
 
@@ -231,7 +190,7 @@ letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
            'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ]
 
 
-def noise_maker(sentence, threshold):
+def noise_maker(sentence, threshold, vocab_to_int):
     '''Relocate, remove, or add characters to create spelling mistakes'''
 
     noisy_sentence = []
@@ -264,17 +223,12 @@ def noise_maker(sentence, threshold):
         i += 1
     return noisy_sentence
 
-
 # *Note: The noise_maker function is used to create spelling mistakes that are similar to those we would make. Sometimes we forget to type a letter, type a letter in the wrong location, or add an extra letter.*
 
 # In[38]:
 
 # Check to ensure noise_maker is making mistakes correctly.
-threshold = 0.9
-for sentence in training_sorted[:5]:
-    print(sentence)
-    print(noise_maker(sentence, threshold))
-    print()
+
 
 
 # # Building the Model
@@ -352,6 +306,35 @@ def encoding_layer(rnn_size, sequence_length, num_layers, rnn_inputs, keep_prob,
             return enc_output, enc_state[0]
 
 
+def buil_model(lstm_sizes, sequence_length, inputs, batch_size, vocab_size, keep_prob_=1.0, num_layers=3):
+
+
+    lstms = [tf.contrib.rnn.LSTMCell(size) for size in lstm_sizes]
+
+    cells = tf.nn.rnn_cell.MultiRNNCell(lstms)
+
+    init_state = cells.zero_state(batch_size, tf.float32)
+    rnn_outputs, final_state = tf.nn.dynamic_rnn(cells, inputs, sequence_length, initial_state=init_state)
+
+    return rnn_outputs, final_state
+
+def build_lstm_layers(lstm_sizes, sequence_length, inputs, batch_size, vocab_size, keep_prob_=1.0):
+    """
+    Create the LSTM layers
+    """
+
+
+    lstms = [tf.contrib.rnn.LSTMCell(size) for size in lstm_sizes]
+    drops = [tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob_) for lstm in lstms]
+
+    cell = tf.contrib.rnn.MultiRNNCell(drops)
+
+    initial_state = cell.zero_state(batch_size, tf.float32)
+    lstm_outputs, final_state = tf.nn.dynamic_rnn(cell, inputs,  swap_memory=True)
+
+    return lstm_outputs, final_state[-1][-1]
+
+
 # In[66]:
 
 def training_decoding_layer(dec_embed_input, targets_length, dec_cell, initial_state, output_layer,
@@ -368,7 +351,7 @@ def training_decoding_layer(dec_embed_input, targets_length, dec_cell, initial_s
                                                            initial_state,
                                                            output_layer)
 
-        training_logits, _ = tf.contrib.seq2seq.dynamic_decode(training_decoder,
+        training_logits, _, _ = tf.contrib.seq2seq.dynamic_decode(training_decoder,
                                                                output_time_major=False,
                                                                impute_finished=True,
                                                                maximum_iterations=max_target_length)
@@ -393,7 +376,7 @@ def inference_decoding_layer(embeddings, start_token, end_token, dec_cell, initi
                                                             initial_state,
                                                             output_layer)
 
-        inference_logits, _ = tf.contrib.seq2seq.dynamic_decode(inference_decoder,
+        inference_logits, _, _ = tf.contrib.seq2seq.dynamic_decode(inference_decoder,
                                                                 output_time_major=False,
                                                                 impute_finished=True,
                                                                 maximum_iterations=max_target_length)
@@ -407,12 +390,8 @@ def decoding_layer(dec_embed_input, embeddings, enc_output, enc_state, vocab_siz
                    max_target_length, rnn_size, vocab_to_int, keep_prob, batch_size, num_layers, direction):
     '''Create the decoding cell and attention for the training and inference decoding layers'''
 
-    with tf.name_scope("RNN_Decoder_Cell"):
-        for layer in range(num_layers):
-            with tf.variable_scope('decoder_{}'.format(layer)):
-                lstm = tf.contrib.rnn.LSTMCell(rnn_size)
-                dec_cell = tf.contrib.rnn.DropoutWrapper(lstm,
-                                                         input_keep_prob=keep_prob)
+    lstms = [tf.contrib.rnn.LSTMCell(size) for size in [100, 100, 100, 100]]
+    cells = tf.nn.rnn_cell.MultiRNNCell(lstms)
 
     output_layer = Dense(vocab_size,
                          kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.1))
@@ -424,14 +403,16 @@ def decoding_layer(dec_embed_input, embeddings, enc_output, enc_state, vocab_siz
                                                      name='BahdanauAttention')
 
     with tf.name_scope("Attention_Wrapper"):
-        dec_cell = tf.contrib.seq2seq.DynamicAttentionWrapper(dec_cell,
+        dec_cell = tf.contrib.seq2seq.AttentionWrapper(cells,
                                                               attn_mech,
                                                               rnn_size)
 
-    initial_state = tf.contrib.seq2seq.DynamicAttentionWrapperState(enc_state,
-                                                                    _zero_state_tensors(rnn_size,
-                                                                                        batch_size,
-                                                                                        tf.float32))
+    initial_state = dec_cell.zero_state(dtype=tf.float32, batch_size= (batch_size))
+
+    #initial_state = tf.contrib.seq2seq.DynamicAttentionWrapperState(enc_state,
+    #                                                                _zero_state_tensors(rnn_size,
+    #                                                                                    batch_size,
+    #                                                                                    tf.float32))
 
     with tf.variable_scope("decode"):
         training_logits = training_decoding_layer(dec_embed_input,
@@ -460,12 +441,14 @@ def seq2seq_model(inputs, targets, keep_prob, inputs_length, targets_length, max
                   vocab_size, rnn_size, num_layers, vocab_to_int, batch_size, embedding_size, direction):
     '''Use the previous functions to create the training and inference logits'''
     print("vocab size: ", vocab_size)
-    enc_embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1, 1))
+    enc_embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1, 1), name="enc_embeddings")
+    #enc_embeddings = tf.Print(enc_embeddings, [enc_embeddings, tf.shape(enc_embeddings)],
+    #                             "enc_embeddings: ")
     enc_embed_input = tf.nn.embedding_lookup(enc_embeddings, inputs)
-    enc_output, enc_state = encoding_layer(rnn_size, inputs_length, num_layers,
-                                           enc_embed_input, keep_prob, direction)
+    #enc_output, enc_state = encoding_layer(rnn_size, inputs_length, num_layers,enc_embed_input, keep_prob, direction)
+    enc_output, enc_state = buil_model([100, 100, 100, 100], inputs_length, enc_embed_input, batch_size, vocab_size, 1.0)
 
-    dec_embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1, 1))
+    dec_embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1, 1), name="dec_embeddings")
     dec_input = process_encoding_input(targets, vocab_to_int, batch_size)
     dec_embed_input = tf.nn.embedding_lookup(dec_embeddings, dec_input)
 
@@ -489,45 +472,52 @@ def seq2seq_model(inputs, targets, keep_prob, inputs_length, targets_length, max
 
 # In[70]:
 
-def pad_sentence_batch(sentence_batch):
+def pad_sentence_batch(sentence_batch, vocab_to_int):
     """Pad sentences with <PAD> so that each sentence of a batch has the same length"""
-    max_sentence = max([len(sentence) for sentence in sentence_batch])
-    return [sentence + [vocab_to_int['<PAD>']] * (max_sentence - len(sentence)) for sentence in sentence_batch]
+    #max_sentence = max([len(sentence) for sentence in sentence_batch])
+    max_sentence = 200
+    batch_ = [sentence + [vocab_to_int['<PAD>']] * (max_sentence - len(sentence)) for sentence in sentence_batch]
+    return batch_
 
 
 # In[71]:
 
-def get_batches(sentences, batch_size, threshold):
+def get_batches(sentences, batch_size, threshold, vocab_to_int, count):
     """Batch sentences, noisy sentences, and the lengths of their sentences together.
        With each epoch, sentences will receive new mistakes"""
 
     #for batch_i in range(0, len(sentences) // batch_size):
-    for batch_i in range(0, len(sentences) // len(sentences)):
+    for batch_i in range(0, count):
         start_i = batch_i * batch_size
-        sentences_batch = sentences[start_i:start_i + batch_size]
+        sentences_batch = copy.deepcopy(sentences[start_i:start_i+batch_size])
 
-        sentences_batch_noisy = []
-        for sentence in sentences_batch:
-            sentences_batch_noisy.append(noise_maker(sentence, threshold))
-
-        sentences_batch_eos = []
-        for sentence in sentences_batch:
-            sentence.append(vocab_to_int['<EOS>'])
-            sentences_batch_eos.append(sentence)
-
-        pad_sentences_batch = np.array(pad_sentence_batch(sentences_batch_eos))
-        pad_sentences_noisy_batch = np.array(pad_sentence_batch(sentences_batch_noisy))
-
-        # Need the lengths for the _lengths parameters
-        pad_sentences_lengths = []
-        for sentence in pad_sentences_batch:
-            pad_sentences_lengths.append(len(sentence))
-
-        pad_sentences_noisy_lengths = []
-        for sentence in pad_sentences_noisy_batch:
-            pad_sentences_noisy_lengths.append(len(sentence))
+        #sentences_batch = sentences[start_i:start_i + batch_size]
+        #sentences_batch = sentences[randint(0, batch_size - 1)]
+        pad_sentences_batch, pad_sentences_lengths, pad_sentences_noisy_batch, pad_sentences_noisy_lengths = get_batch(
+            sentences_batch, threshold, vocab_to_int)
 
         yield pad_sentences_noisy_batch, pad_sentences_batch, pad_sentences_noisy_lengths, pad_sentences_lengths
+        #yield np.zeros(pad_sentences_noisy_batch.shape), np.zeros(pad_sentences_batch.shape), pad_sentences_noisy_lengths, pad_sentences_lengths
+
+
+def get_batch(sentences_batch, threshold, vocab_to_int):
+    sentences_batch_noisy = []
+    for sentence in sentences_batch:
+        sentences_batch_noisy.append(noise_maker(sentence, threshold, vocab_to_int))
+    sentences_batch_eos = []
+    for sentence in sentences_batch:
+        sentence.append(vocab_to_int['<EOS>'])
+        sentences_batch_eos.append(sentence)
+    pad_sentences_batch = np.array(pad_sentence_batch(sentences_batch_eos, vocab_to_int))
+    pad_sentences_noisy_batch = np.array(pad_sentence_batch(sentences_batch_noisy, vocab_to_int))
+    # Need the lengths for the _lengths parameters
+    pad_sentences_lengths = []
+    for sentence in pad_sentences_batch:
+        pad_sentences_lengths.append(len(sentence))
+    pad_sentences_noisy_lengths = []
+    for sentence in pad_sentences_noisy_batch:
+        pad_sentences_noisy_lengths.append(len(sentence))
+    return pad_sentences_batch, pad_sentences_lengths, pad_sentences_noisy_batch, pad_sentences_noisy_lengths
 
 
 # *Note: This set of values achieved the best results.*
@@ -535,21 +525,21 @@ def get_batches(sentences, batch_size, threshold):
 # In[72]:
 
 # The default parameters
-epochs = 1000
-batch_size = 4
-num_layers = 2
+epochs = 100000
+batch_size = 400
+num_layers = 4
 rnn_size = 51
-embedding_size = 128
-learning_rate = 0.0005
-direction = 2
-threshold = 0.95
-keep_probability = 0.75
-
+embedding_size = 50
+learning_rate = 0.0001
+direction = 1
+threshold = 0.999
+keep_probability = 1
+save_file_name="./kp=1,nl=4,th=0.999.ckpt"
 
 # In[73]:
 
-def build_graph(keep_prob, rnn_size, num_layers, batch_size, learning_rate, embedding_size, direction):
-    tf.reset_default_graph()
+def build_graph(vocab_to_int, keep_prob, rnn_size, num_layers, batch_size, learning_rate, embedding_size, direction):
+    #tf.reset_default_graph()
 
     # Load the model inputs
     inputs, targets, keep_prob, inputs_length, targets_length, max_target_length = model_inputs()
@@ -587,12 +577,12 @@ def build_graph(keep_prob, rnn_size, num_layers, batch_size, learning_rate, embe
         tf.summary.scalar('cost', cost)
 
     with tf.name_scope("optimze"):
-        optimizer = tf.train.AdamOptimizer(learning_rate)
+        optimizer = tf.train.AdamOptimizer(learning_rate, beta1=0.85, beta2=0.99)
 
-        # Gradient Clipping
-        gradients = optimizer.compute_gradients(cost)
-        capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
-        train_op = optimizer.apply_gradients(capped_gradients)
+        grads = tf.gradients(cost, tf.trainable_variables())
+        grads, _ = tf.clip_by_global_norm(grads, 5)  # gradient clipping
+        grads_and_vars = list(zip(grads, tf.trainable_variables()))
+        train_op = optimizer.apply_gradients(grads_and_vars)
 
     # Merge all of the summaries
     merged = tf.summary.merge_all()
@@ -611,11 +601,15 @@ def build_graph(keep_prob, rnn_size, num_layers, batch_size, learning_rate, embe
 
 # In[74]:
 
-def train(model, epochs, log_string):
-    '''Train the RNN'''
+def train(default_graph, session, model, epochs, log_string, vocab_to_int):
 
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
+        saver = tf.train.Saver()
+
+        session.run(tf.global_variables_initializer())
+
+
+        checkpoint = "./kp=1,nl=4,th=0.999.ckpt"
+        saver.restore(session, checkpoint)
 
         # Used to determine when to stop the training early
         testing_loss_summary = []
@@ -623,179 +617,128 @@ def train(model, epochs, log_string):
         # Keep track of which batch iteration is being trained
         iteration = 0
 
-        display_step = 30  # The progress of the training will be displayed after every 30 batches
         stop_early = 0
-        stop = 20  # If the batch_loss_testing does not decrease in 3 consecutive checks, stop training
-        per_epoch = 3  # Test the model 3 times per epoch
-        testing_check = (len(training_sorted) // batch_size // per_epoch) - 1
+        stop = 20000  # If the batch_loss_testing does not decrease in 3 consecutive checks, stop training
+        epoch_size = 200
+        epoch_size_test = 10
 
         print()
         print("Training Model: {}".format(log_string))
 
-        train_writer = tf.summary.FileWriter('./logs/1/train/{}'.format(log_string), sess.graph)
+        train_writer = tf.summary.FileWriter('./logs/1/train/{}'.format(log_string), session.graph)
         test_writer = tf.summary.FileWriter('./logs/1/test/{}'.format(log_string))
 
         for epoch_i in range(1, epochs + 1):
-            batch_loss = 0
-            batch_time = 0
+                batch_loss = 0
+                batch_time = 0
 
-            for batch_i, (input_batch, target_batch, input_length, target_length) in enumerate(
-                    get_batches(training_sorted, batch_size, threshold)):
-                start_time = time.time()
+                np.random.shuffle(training_sorted)
 
-                summary, loss, _ = sess.run([model.merged,
-                                             model.cost,
-                                             model.train_op],
-                                            {model.inputs: input_batch,
-                                             model.targets: target_batch,
-                                             model.inputs_length: input_length,
-                                             model.targets_length: target_length,
-                                             model.keep_prob: keep_probability})
+                for batch_i, (input_batch, target_batch, input_length, target_length) in enumerate(
+                        get_batches(training_sorted, batch_size, threshold, vocab_to_int, epoch_size)):
+                    start_time = time.time()
+                    with default_graph.as_default():
+                        #print(target_batch.shape)
+                        #print(target_batch)
+                        summary, loss, _ = session.run([model.merged,
+                                                     model.cost,
+                                                     model.train_op],
+                                                    {model.inputs: input_batch,
+                                                     model.targets: target_batch,
+                                                     model.inputs_length: input_length,
+                                                     model.targets_length: target_length,
+                                                     model.keep_prob: keep_probability})
 
-                batch_loss += loss
-                end_time = time.time()
-                batch_time += end_time - start_time
+                    batch_loss += loss
+                    end_time = time.time()
+                    batch_time += end_time - start_time
 
-                # Record the progress of training
-                train_writer.add_summary(summary, iteration)
+                    # Record the progress of training
+                    train_writer.add_summary(summary, iteration)
 
-                iteration += 1
+                    iteration += 1
 
-                if batch_i % display_step == 0:
-                    print('Epoch {:>3}/{} Batch {:>4}/{} - Loss: {:>6.3f}, Seconds: {:>4.2f}'
-                          .format(epoch_i,
-                                  epochs,
-                                  batch_i,
-                                  len(training_sorted) // batch_size,
-                                  batch_loss / display_step,
-                                  batch_time))
-                    batch_loss = 0
-                    batch_time = 0
+                print('Epoch {:>3} - Loss: {:>6.10f}, Seconds: {:>4.2f}'
+                      .format(epoch_i,
+                              batch_loss / epoch_size,
+                              batch_time))
 
-                #### Testing ####
-                if testing_check == 0 or batch_i % testing_check == 0:
-                    batch_loss_testing = 0
-                    batch_time_testing = 0
-                    for batch_i, (input_batch, target_batch, input_length, target_length) in enumerate(
-                            get_batches(testing_sorted, batch_size, threshold)):
-                        start_time_testing = time.time()
-                        summary, loss = sess.run([model.merged,
-                                                  model.cost],
-                                                 {model.inputs: input_batch,
-                                                  model.targets: target_batch,
-                                                  model.inputs_length: input_length,
-                                                  model.targets_length: target_length,
-                                                  model.keep_prob: 1})
+                batch_loss_testing = 0
+                batch_time_testing = 0
+                for batch_i, (input_batch, target_batch, input_length, target_length) in enumerate(
+                        get_batches(testing_sorted, batch_size, threshold, vocab_to_int, epoch_size_test)):
+                    start_time_testing = time.time()
+                    #print(target_batch.shape)
+                    #print(target_batch)
+                    summary, loss = session.run([model.merged,
+                                              model.cost],
+                                             {model.inputs: input_batch,
+                                              model.targets: target_batch,
+                                              model.inputs_length: input_length,
+                                              model.targets_length: target_length,
+                                              model.keep_prob: 1})
 
-                        batch_loss_testing += loss
-                        end_time_testing = time.time()
-                        batch_time_testing += end_time_testing - start_time_testing
+                    batch_loss_testing += loss
+                    end_time_testing = time.time()
+                    batch_time_testing += end_time_testing - start_time_testing
 
-                        # Record the progress of testing
-                        test_writer.add_summary(summary, iteration)
+                    # Record
+                    # the progress of testing
+                    test_writer.add_summary(summary, iteration)
 
-                    n_batches_testing = batch_i + 1
-                    print('Testing Loss: {:>6.3f}, Seconds: {:>4.2f}'
-                          .format(batch_loss_testing / n_batches_testing,
-                                  batch_time_testing))
+                print('Testing Loss: {:>6.10f}, Seconds: {:>4.2f}'
+                      .format(batch_loss_testing / epoch_size_test,
+                              batch_time_testing))
 
-                    batch_time_testing = 0
 
-                    # If the batch_loss_testing is at a new minimum, save the model
-                    testing_loss_summary.append(batch_loss_testing)
-                    if batch_loss_testing <= min(testing_loss_summary):
-                        print('New Record!')
-                        stop_early = 0
-                        checkpoint = "./{}.ckpt".format(log_string)
-                        saver = tf.train.Saver()
-                        saver.save(sess, checkpoint)
+                # If the batch_loss_testing is at a new minimum, save the model
+                testing_loss_summary.append(batch_loss_testing)
+                if batch_loss_testing <= min(testing_loss_summary):
+                    print('New Record!')
+                    stop_early = 0
+                    saver = tf.train.Saver()
+                    saver.save(session, save_file_name)
 
-                    else:
-                        print("No Improvement.")
-                        stop_early += 1
-                        if stop_early == stop:
-                            break
+                else:
+                    print("No Improvement.")
+                    stop_early += 1
+                    if stop_early == stop:
+                        break
 
-            if stop_early == stop:
-                print("Stopping Training.")
-                break
+                if stop_early == stop:
+                    print("Stopping Training.")
+                    break
 
 
 # In[ ]:
 
-# Train the model with the desired tuning parameters
-for keep_probability in [0.75]:
-    for num_layers in [2]:
-        for threshold in [0.95]:
-            log_string = 'kp={},nl={},th={}'.format(keep_probability,
-                                                    num_layers,
-                                                    threshold)
-            model = build_graph(keep_probability, rnn_size, num_layers, batch_size,
-                                learning_rate, embedding_size, direction)
-            train(model, epochs, log_string)
+
+def main():
+
+                vocab_to_int = pre_data()
+                print(vocab_to_int["a"])
+                print(vocab_to_int["b"])
+                print(vocab_to_int["c"])
+                print(vocab_to_int["d"])
+                log_string = 'kp={},nl={},th={}'.format(keep_probability,
+                                                        num_layers,
+                                                        threshold)
+
+                session = tf.Session()
+                default_graph = tf.get_default_graph()
+
+                model = build_graph(vocab_to_int, keep_probability, rnn_size, num_layers, batch_size,
+                                    learning_rate, embedding_size, direction)
+
+                train(default_graph, session, model, epochs, log_string, vocab_to_int)
 
 
-# ## Fixing Custom Sentences
+if __name__ == "__main__":
+    import time
 
-# In[75]:
+    time.sleep(1)
 
-def text_to_ints(text):
-    '''Prepare the text for the model'''
-
-    text = clean_text(text)
-    return [vocab_to_int[word] for word in text]
+    main()
 
 
-# In[176]:
 
-# Create your own sentence or use one from the dataset
-text = "Det er en settning"
-text = text_to_ints(text)
-
-# random = np.random.randint(0,len(testing_sorted))
-# text = testing_sorted[random]
-# text = noise_maker(text, 0.95)
-
-checkpoint = "./kp=0.75,nl=2,th=0.95.ckpt"
-
-model = build_graph(keep_probability, rnn_size, num_layers, batch_size, learning_rate, embedding_size, direction)
-
-with tf.Session() as sess:
-    # Load saved model
-    saver = tf.train.Saver()
-    saver.restore(sess, checkpoint)
-
-    # Multiply by batch_size to match the model's input parameters
-    answer_logits = sess.run(model.predictions, {model.inputs: [text] * batch_size,
-                                                 model.inputs_length: [len(text)] * batch_size,
-                                                 model.targets_length: [len(text) + 1],
-                                                 model.keep_prob: [1.0]})[0]
-
-# Remove the padding from the generated sentence
-pad = vocab_to_int["<PAD>"]
-
-print('\nText')
-print('  Word Ids:    {}'.format([i for i in text]))
-print('  Input Words: {}'.format("".join([int_to_vocab[i] for i in text])))
-
-print('\nSummary')
-print('  Word Ids:       {}'.format([i for i in answer_logits if i != pad]))
-print('  Response Words: {}'.format("".join([int_to_vocab[i] for i in answer_logits if i != pad])))
-
-# Examples of corrected sentences:
-# - Spellin is difficult, whch is wyh you need to study everyday.
-# - Spelling is difficult, which is why you need to study everyday.
-#
-#
-# - The first days of her existence in th country were vrey hard for Dolly.
-# - The first days of her existence in the country were very hard for Dolly.
-#
-#
-# - Thi is really something impressiv thaat we should look into right away!
-# - This is really something impressive that we should look into right away!
-
-# ## Summary
-
-# I hope that you have found this project to be rather interesting and useful. The example sentences that I have presented above were specifically chosen, and the model will not always be able to make corrections of this quality. Given the amount of data that we are working with, this model still struggles. For it to be more useful, it would require far more training data, and additional parameter tuning. This parameter values that I have above worked best for me, but I expect there are even better values that I was not able to find.
-#
-# Thanks for reading!
