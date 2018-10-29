@@ -1,26 +1,8 @@
 # coding: utf-8
 
-# # Creating a Spell Checker
-
-# The objective of this project is to build a model that can take a sentence with spelling mistakes as input, and output the same sentence, but with the mistakes corrected. The data that we will use for this project will be twenty popular books from [Project Gutenberg](http://www.gutenberg.org/ebooks/search/?sort_order=downloads). Our model is designed using grid search to find the optimal architecture, and hyperparameter values. The best results, as measured by sequence loss with 15% of our data, were created using a two-layered network with a bi-direction RNN in the encoding layer and Bahdanau Attention in the decoding layer. [FloydHub's](https://www.floydhub.com/) GPU service was used to train the model.
-#
-# The sections of the project are:
-# - Loading the Data
-# - Preparing the Data
-# - Building the Model
-# - Training the Model
-# - Fixing Custom Sentences
-# - Summary
-
-# In[1]:
 import copy
-import pickle
-import random
-
-from tensorflow.contrib import training
-
-from Utils import save_obj
 import os
+from Utils import save_obj
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
@@ -32,15 +14,9 @@ from os import listdir
 from os.path import isfile, join
 from collections import namedtuple
 from tensorflow.python.layers.core import Dense
-from tensorflow.python.ops.rnn_cell_impl import _zero_state_tensors
-import time
 import re
 from sklearn.model_selection import train_test_split
 
-
-# ## Loading the Data
-
-# In[2]:
 
 def load_text(path):
     input_file = os.path.join(path)
@@ -50,7 +26,6 @@ def load_text(path):
 
 def clean_text(text):
     '''Remove unwanted characters and extra spaces from the text'''
-
     text = text.lower()
     text = re.sub(r'\n', ' ', text)
 
@@ -61,42 +36,39 @@ def clean_text(text):
 # In[3]:
 def pre_data():
     global clean_text, sentence, training_sorted, testing_sorted
-    # Collect all of the book file names
-    path = './books/'
-    book_files = [f for f in listdir(path) if isfile(join(path, f))]
-    #book_files = book_files[1:]
-    # In[4]:
-    # Load the books using the file names
-    books = []
-    for book in book_files:
+    path = './texts/'
+    text_files = [f for f in listdir(path) if isfile(join(path, f))]
+
+    texts = []
+    for text in text_files:
         print(path)
-        print(book)
-        books.append(load_text(path + book))
+        print(text)
+        texts.append(load_text(path + text))
     # In[5]:
-    # Compare the number of words in each book
-    for i in range(len(books)):
-        print("There are {} words in {}.".format(len(books[i].split()), book_files[i]))
+    # Compare the number of words in each text
+    for i in range(len(texts)):
+        print("There are {} words in {}.".format(len(texts[i].split()), text_files[i]))
     # In[9]:
     # Check to ensure the text looks alright
-    books[0][:500]
+    texts[0][:500]
 
     # ## Preparing the Data
     # In[10]:
 
     # In[11]:
-    # Clean the text of the books
-    clean_books = []
-    for book in books:
-        clean_books.append(clean_text(book))
+    # Clean the text of the texts
+    clean_texts = []
+    for text in texts:
+        clean_texts.append(clean_text(text))
     # In[12]:
     # Check to ensure the text has been cleaned properly
-    clean_books[0][:500]
+    clean_texts[0][:500]
     # In[13]:
     # Create a dictionary to convert the vocabulary (characters) to integers
     vocab_to_int = {}
     count = 0
-    for book in clean_books:
-        for character in book:
+    for text in clean_texts:
+        for character in text:
             if character not in vocab_to_int:
                 vocab_to_int[character] = count
                 count += 1
@@ -119,16 +91,16 @@ def pre_data():
         int_to_vocab[value] = character
     save_obj(int_to_vocab, "int_to_vocab")
     # In[16]:
-    # Split the text from the books into sentences.
+    # Split the text from the texts into sentences.
     sentences = []
-    for book in clean_books:
-        for sentence in book.split('.'):
+    for text in clean_texts:
+        for sentence in text.split('.'):
             sentences.append(sentence.strip() + '.')
     print("There are {} sentences.".format(len(sentences)))
     # In[17]:
     # Check to ensure the text has been split correctly.
     sentences[:5]
-    # *Note: I expect that you have noticed the very ugly text in the first sentence. We do not need to worry about removing it from any of the books because will be limiting our data to sentences that are shorter than it.*
+    # *Note: I expect that you have noticed the very ugly text in the first sentence. We do not need to worry about removing it from any of the texts because will be limiting our data to sentences that are shorter than it.*
     # In[18]:
     # Convert sentences to integers
     int_sentences = []
@@ -736,7 +708,7 @@ def main():
 if __name__ == "__main__":
     import time
 
-    time.sleep(1)
+    time.sleep(0)
 
     main()
 
