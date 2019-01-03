@@ -1,5 +1,5 @@
 from Utils import load_obj
-from correct import build_graph, clean_text, get_batches, get_batch
+from train_model import build_graph, clean_text, get_batches, get_batch
 import tensorflow as tf
 
 import os
@@ -8,9 +8,9 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 epochs = 1000
 batch_size = 500
 num_layers = 4
-rnn_size = 51
-embedding_size = 50
-learning_rate = 0.0005
+rnn_size = 70
+embedding_size = 20
+learning_rate = 0.00001
 direction = 2
 threshold = 1.0
 keep_probability = 1.0
@@ -27,7 +27,7 @@ def text_to_ints(text):
 # In[176]:
 
 # Create your own sentence or use one from the dataset
-text = "a b c d e f g h i j k l m n o p q r s t u v w x y z ."
+text = "Jeg liker å spise mit og drikke vann."
 text = text_to_ints(text)
 
 # random = np.random.randint(0,len(testing_sorted))
@@ -47,9 +47,10 @@ with tf.Session() as sess:
     # Multiply by batch_size to match the model's input parameters
     test_sentences = [list(text) for _ in range(batch_size)]
     test_sentences = get_batch(test_sentences, threshold, vocab_to_int)[2]
+    print("test_sentences[0]: ", test_sentences[0])
     answer_logits = sess.run(model.predictions, {model.inputs: test_sentences,
-                                                 model.inputs_length: [200] * batch_size,
-                                                 model.targets_length: [200] * batch_size,
+                                                 model.inputs_length: [100] * batch_size,
+                                                 model.targets_length: [100] * batch_size,
                                                  model.keep_prob: [1.0]})[0]
 
 
