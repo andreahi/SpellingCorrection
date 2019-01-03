@@ -1,8 +1,11 @@
 # coding: utf-8
 
 import copy
+
 import os
+
 from Utils import save_obj
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
@@ -119,14 +122,13 @@ def pre_data():
     lengths.describe()
     # In[21]:
     # Limit the data we will use to train our model
-    max_length = 190
-    min_length = 3
+    max_length = 50
+    min_length = 1
     good_sentences = []
     for sentence in int_sentences:
         if len(sentence) <= max_length and len(sentence) >= min_length:
             good_sentences.append(sentence)
-        else:
-            print("sentence not good enough: ", sentence)
+
     print("We will use {} to train and test our model.".format(len(good_sentences)))
     # *Note: I decided to not use very long or short sentences because they are not as useful for training our model. Shorter sentences are less likely to include an error and the text is more likely to be repetitive. Longer sentences are more difficult to learn due to their length and increase the training time quite a bit. If you are interested in using this model for more than just a personal project, it would be worth using these longer sentence, and much more training data to create a more accurate model.*
     # In[22]:
@@ -138,18 +140,24 @@ def pre_data():
     # Sort the sentences by length to reduce padding, which will allow the model to train faster
     training_sorted = []
     testing_sorted = []
-    for i in range(min_length, max_length + 1):
-        for sentence in training:
-            if len(sentence) == i:
-                training_sorted.append(sentence)
-        for sentence in testing:
-            if len(sentence) == i:
-                testing_sorted.append(sentence)
+    training_sorted = training
+    testing_sorted = testing
+
+    sentences_len = map(len, sentences)
+    from collections import Counter
+    labels, values = zip(*Counter(sentences_len).items())
+    print("labels: ", labels)
+    print("values: ", values)
+
+    for i in range(len(labels)):
+        print(str(labels[i]) + ":" + str(values[i]))
+
+
     # In[24]:
     # Check to ensure the sentences have been selected and sorted correctly
     for i in range(2):
         print(training_sorted[i], len(training_sorted[i]))
-    threshold = 0.9
+    threshold = 0.95
     for sentence in training_sorted[:5]:
         print(sentence)
         print(noise_maker(sentence, threshold, vocab_to_int))
@@ -159,10 +167,10 @@ def pre_data():
 # In[36]:
 
 letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-           'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ]
+           'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'æ', 'ø', 'å', ' ' ]
 
 
-def noise_maker(sentence, threshold, vocab_to_int):
+def noise_maker(sentence, threshold, vocab_to_int, depth = 3):
     '''Relocate, remove, or add characters to create spelling mistakes'''
 
     noisy_sentence = []
@@ -175,7 +183,7 @@ def noise_maker(sentence, threshold, vocab_to_int):
         else:
             new_random = np.random.uniform(0, 1, 1)
             # ~33% chance characters will swap locations
-            if new_random > 0.67:
+            if new_random > 0.75:
                 if i == (len(sentence) - 1):
                     # If last character in sentence, it will not be typed
                     continue
@@ -185,15 +193,21 @@ def noise_maker(sentence, threshold, vocab_to_int):
                     noisy_sentence.append(sentence[i])
                     i += 1
             # ~33% chance an extra lower case letter will be added to the sentence
-            elif new_random < 0.33:
+            elif new_random > 0.50:
                 random_letter = np.random.choice(letters, 1)[0]
                 noisy_sentence.append(vocab_to_int[random_letter])
                 noisy_sentence.append(sentence[i])
-            # ~33% chance a character will not be typed
+            # chance the wrong character is typed
+            elif new_random > 0.25:
+                random_letter = np.random.choice(letters, 1)[0]
+                noisy_sentence.append(vocab_to_int[random_letter])
+            # chance a character will not be typed
             else:
                 pass
         i += 1
-    return noisy_sentence
+    if depth <= 0:
+        return noisy_sentence
+    return noise_maker(noisy_sentence, threshold, vocab_to_int, depth - 1)
 
 # *Note: The noise_maker function is used to create spelling mistakes that are similar to those we would make. Sometimes we forget to type a letter, type a letter in the wrong location, or add an extra letter.*
 
@@ -286,7 +300,7 @@ def buil_model(lstm_sizes, sequence_length, inputs, batch_size, vocab_size, keep
     cells = tf.nn.rnn_cell.MultiRNNCell(lstms)
 
     init_state = cells.zero_state(batch_size, tf.float32)
-    rnn_outputs, final_state = tf.nn.dynamic_rnn(cells, inputs, sequence_length, initial_state=init_state)
+    rnn_outputs, final_state = tf.nn.dynamic_rnn(cells, inputs, sequence_length, initial_state=init_state, swap_memory=False)
 
     return rnn_outputs, final_state
 
@@ -302,12 +316,10 @@ def build_lstm_layers(lstm_sizes, sequence_length, inputs, batch_size, vocab_siz
     cell = tf.contrib.rnn.MultiRNNCell(drops)
 
     initial_state = cell.zero_state(batch_size, tf.float32)
-    lstm_outputs, final_state = tf.nn.dynamic_rnn(cell, inputs,  swap_memory=True)
+    lstm_outputs, final_state = tf.nn.dynamic_rnn(cell, inputs,  swap_memory=False)
 
     return lstm_outputs, final_state[-1][-1]
 
-
-# In[66]:
 
 def training_decoding_layer(dec_embed_input, targets_length, dec_cell, initial_state, output_layer,
                             vocab_size, max_target_length):
@@ -326,7 +338,9 @@ def training_decoding_layer(dec_embed_input, targets_length, dec_cell, initial_s
         training_logits, _, _ = tf.contrib.seq2seq.dynamic_decode(training_decoder,
                                                                output_time_major=False,
                                                                impute_finished=True,
-                                                               maximum_iterations=max_target_length)
+                                                                  swap_memory = False,
+                                                                  maximum_iterations=max_target_length*2
+                                                               )
         return training_logits
 
 
@@ -351,7 +365,8 @@ def inference_decoding_layer(embeddings, start_token, end_token, dec_cell, initi
         inference_logits, _, _ = tf.contrib.seq2seq.dynamic_decode(inference_decoder,
                                                                 output_time_major=False,
                                                                 impute_finished=True,
-                                                                maximum_iterations=max_target_length)
+                                                                   swap_memory=False,
+                                                                   maximum_iterations=max_target_length*2)
 
         return inference_logits
 
@@ -362,7 +377,7 @@ def decoding_layer(dec_embed_input, embeddings, enc_output, enc_state, vocab_siz
                    max_target_length, rnn_size, vocab_to_int, keep_prob, batch_size, num_layers, direction):
     '''Create the decoding cell and attention for the training and inference decoding layers'''
 
-    lstms = [tf.contrib.rnn.LSTMCell(size) for size in [100, 100, 100, 100]]
+    lstms = [tf.contrib.rnn.LSTMCell(size) for size in [rnn_size, rnn_size, rnn_size, rnn_size]]
     cells = tf.nn.rnn_cell.MultiRNNCell(lstms)
 
     output_layer = Dense(vocab_size,
@@ -418,7 +433,7 @@ def seq2seq_model(inputs, targets, keep_prob, inputs_length, targets_length, max
     #                             "enc_embeddings: ")
     enc_embed_input = tf.nn.embedding_lookup(enc_embeddings, inputs)
     #enc_output, enc_state = encoding_layer(rnn_size, inputs_length, num_layers,enc_embed_input, keep_prob, direction)
-    enc_output, enc_state = buil_model([100, 100, 100, 100], inputs_length, enc_embed_input, batch_size, vocab_size, 1.0)
+    enc_output, enc_state = buil_model([rnn_size, rnn_size, rnn_size, rnn_size], inputs_length, enc_embed_input, batch_size, vocab_size, 1.0)
 
     dec_embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1, 1), name="dec_embeddings")
     dec_input = process_encoding_input(targets, vocab_to_int, batch_size)
@@ -447,7 +462,7 @@ def seq2seq_model(inputs, targets, keep_prob, inputs_length, targets_length, max
 def pad_sentence_batch(sentence_batch, vocab_to_int):
     """Pad sentences with <PAD> so that each sentence of a batch has the same length"""
     #max_sentence = max([len(sentence) for sentence in sentence_batch])
-    max_sentence = 200
+    max_sentence = 100
     batch_ = [sentence + [vocab_to_int['<PAD>']] * (max_sentence - len(sentence)) for sentence in sentence_batch]
     return batch_
 
@@ -498,13 +513,13 @@ def get_batch(sentences_batch, threshold, vocab_to_int):
 
 # The default parameters
 epochs = 100000
-batch_size = 400
+batch_size = 1024
 num_layers = 4
-rnn_size = 51
-embedding_size = 50
-learning_rate = 0.0001
+rnn_size = 70
+embedding_size = 20
+learning_rate = 0.000005
 direction = 1
-threshold = 0.999
+threshold = 0.97
 keep_probability = 1
 save_file_name="./kp=1,nl=4,th=0.999.ckpt"
 
@@ -549,10 +564,17 @@ def build_graph(vocab_to_int, keep_prob, rnn_size, num_layers, batch_size, learn
         tf.summary.scalar('cost', cost)
 
     with tf.name_scope("optimze"):
-        optimizer = tf.train.AdamOptimizer(learning_rate, beta1=0.85, beta2=0.99)
+        optimizer = tf.train.AdamOptimizer(learning_rate, epsilon=1e-6)
+        #optimizer = AdamWeightDecayOptimizer(
+      #learning_rate=learning_rate,
+      #weight_decay_rate=0,
+      #beta_1=0.9,
+      #beta_2=0.999,
+      #epsilon=1e-6,
+      #exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"])
 
         grads = tf.gradients(cost, tf.trainable_variables())
-        grads, _ = tf.clip_by_global_norm(grads, 5)  # gradient clipping
+        grads, _ = tf.clip_by_global_norm(grads, 1.0)  # gradient clipping
         grads_and_vars = list(zip(grads, tf.trainable_variables()))
         train_op = optimizer.apply_gradients(grads_and_vars)
 
@@ -571,7 +593,96 @@ def build_graph(vocab_to_int, keep_prob, rnn_size, num_layers, batch_size, learn
 
 # ## Training the Model
 
-# In[74]:
+
+class AdamWeightDecayOptimizer(tf.train.Optimizer):
+  """A basic Adam optimizer that includes "correct" L2 weight decay."""
+
+  def __init__(self,
+               learning_rate,
+               weight_decay_rate=0.0,
+               beta_1=0.9,
+               beta_2=0.999,
+               epsilon=1e-6,
+               exclude_from_weight_decay=None,
+               name="AdamWeightDecayOptimizer"):
+    """Constructs a AdamWeightDecayOptimizer."""
+    super(AdamWeightDecayOptimizer, self).__init__(False, name)
+
+    self.learning_rate = learning_rate
+    self.weight_decay_rate = weight_decay_rate
+    self.beta_1 = beta_1
+    self.beta_2 = beta_2
+    self.epsilon = epsilon
+    self.exclude_from_weight_decay = exclude_from_weight_decay
+
+  def apply_gradients(self, grads_and_vars, global_step=None, name=None):
+    """See base class."""
+    assignments = []
+    for (grad, param) in grads_and_vars:
+      if grad is None or param is None:
+        continue
+
+      param_name = self._get_variable_name(param.name)
+
+      m = tf.get_variable(
+          name=param_name + "/adam_m",
+          shape=param.shape.as_list(),
+          dtype=tf.float32,
+          trainable=False,
+          initializer=tf.zeros_initializer())
+      v = tf.get_variable(
+          name=param_name + "/adam_v",
+          shape=param.shape.as_list(),
+          dtype=tf.float32,
+          trainable=False,
+          initializer=tf.zeros_initializer())
+
+      # Standard Adam update.
+      next_m = (
+          tf.multiply(self.beta_1, m) + tf.multiply(1.0 - self.beta_1, grad))
+      next_v = (
+          tf.multiply(self.beta_2, v) + tf.multiply(1.0 - self.beta_2,
+                                                    tf.square(grad)))
+
+      update = next_m / (tf.sqrt(next_v) + self.epsilon)
+
+      # Just adding the square of the weights to the loss function is *not*
+      # the correct way of using L2 regularization/weight decay with Adam,
+      # since that will interact with the m and v parameters in strange ways.
+      #
+      # Instead we want ot decay the weights in a manner that doesn't interact
+      # with the m/v parameters. This is equivalent to adding the square
+      # of the weights to the loss with plain (non-momentum) SGD.
+      if self._do_use_weight_decay(param_name):
+        update += self.weight_decay_rate * param
+
+      update_with_lr = self.learning_rate * update
+
+      next_param = param - update_with_lr
+
+      assignments.extend(
+          [param.assign(next_param),
+           m.assign(next_m),
+           v.assign(next_v)])
+    return tf.group(*assignments, name=name)
+
+  def _do_use_weight_decay(self, param_name):
+    """Whether to use L2 weight decay for `param_name`."""
+    if not self.weight_decay_rate:
+      return False
+    if self.exclude_from_weight_decay:
+      for r in self.exclude_from_weight_decay:
+        if re.search(r, param_name) is not None:
+          return False
+    return True
+
+  def _get_variable_name(self, param_name):
+    """Get the variable name from the tensor name."""
+    m = re.match("^(.*):\\d+$", param_name)
+    if m is not None:
+      param_name = m.group(1)
+    return param_name
+
 
 def train(default_graph, session, model, epochs, log_string, vocab_to_int):
 
@@ -609,30 +720,34 @@ def train(default_graph, session, model, epochs, log_string, vocab_to_int):
                 for batch_i, (input_batch, target_batch, input_length, target_length) in enumerate(
                         get_batches(training_sorted, batch_size, threshold, vocab_to_int, epoch_size)):
                     start_time = time.time()
+                    #print("input_batch[0]: ", input_batch[0])
+                    #print("input_length: ", input_length)
+                    #print("target_length: ", target_length)
                     with default_graph.as_default():
-                        #print(target_batch.shape)
-                        #print(target_batch)
-                        summary, loss, _ = session.run([model.merged,
+                        #print(input_batch.shape)
+                        #print(input_batch[0])
+                        #print(target_batch[0])
+                        loss, _ = session.run([
                                                      model.cost,
                                                      model.train_op],
                                                     {model.inputs: input_batch,
                                                      model.targets: target_batch,
                                                      model.inputs_length: input_length,
                                                      model.targets_length: target_length,
-                                                     model.keep_prob: keep_probability})
+                                                     model.keep_prob: .99})
 
                     batch_loss += loss
                     end_time = time.time()
                     batch_time += end_time - start_time
 
                     # Record the progress of training
-                    train_writer.add_summary(summary, iteration)
+                    #train_writer.add_summary(summary, iteration)
 
                     iteration += 1
 
                 print('Epoch {:>3} - Loss: {:>6.10f}, Seconds: {:>4.2f}'
                       .format(epoch_i,
-                              batch_loss / epoch_size,
+                              batch_loss / (epoch_size),
                               batch_time))
 
                 batch_loss_testing = 0
@@ -659,13 +774,13 @@ def train(default_graph, session, model, epochs, log_string, vocab_to_int):
                     test_writer.add_summary(summary, iteration)
 
                 print('Testing Loss: {:>6.10f}, Seconds: {:>4.2f}'
-                      .format(batch_loss_testing / epoch_size_test,
+                      .format(batch_loss_testing / (epoch_size),
                               batch_time_testing))
 
 
                 # If the batch_loss_testing is at a new minimum, save the model
                 testing_loss_summary.append(batch_loss_testing)
-                if batch_loss_testing <= min(testing_loss_summary):
+                if True or batch_loss_testing <= min(testing_loss_summary):
                     print('New Record!')
                     stop_early = 0
                     saver = tf.train.Saver()
@@ -714,3 +829,8 @@ if __name__ == "__main__":
 
 
 
+"""
+Training Model: kp=1,nl=4,th=0.999
+Epoch   1 - Loss: 0.0000340639, Seconds: 353.48
+Testing Loss: 0.0000011433, Seconds: 7.00
+"""
