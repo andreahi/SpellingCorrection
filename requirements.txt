@@ -1,6 +1,5 @@
 scikit-learn
-tensorflow==1.11.0
-tensorflow-gpu==1.11.0
+tensorflow-gpu==1.13.0-rc0
 pandas
 numpy
 tensor2tensor==1.9.0
