@@ -513,7 +513,7 @@ def get_batch(sentences_batch, threshold, vocab_to_int):
 
 # The default parameters
 epochs = 100000
-batch_size = 1024
+batch_size = 4096
 num_layers = 4
 rnn_size = 70
 embedding_size = 20
